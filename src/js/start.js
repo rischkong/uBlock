@@ -16,7 +16,7 @@
     You should have received a copy of the GNU General Public License
     along with this program.  If not, see {http://www.gnu.org/licenses/}.
 
-    Home: https://github.com/chrisaljoudi/uBlock
+    Home: https://github.com/uBlockAdmin/uBlock
 */
 
 /* global publicSuffixList, vAPI, µBlock */
@@ -42,7 +42,7 @@ var µb = µBlock;
 // - Schedule next update operation.
 
 var onAllReady = function() {
-    // https://github.com/chrisaljoudi/uBlock/issues/184
+    // https://github.com/uBlockAdmin/uBlock/issues/184
     // Check for updates not too far in the future.
     µb.assetUpdater.onStart.addEventListener(µb.updateStartHandler.bind(µb));
     µb.assetUpdater.onCompleted.addEventListener(µb.updateCompleteHandler.bind(µb));
@@ -114,10 +114,10 @@ var onSelfieReady = function(selfie) {
 
 /******************************************************************************/
 
-// https://github.com/chrisaljoudi/uBlock/issues/226
+// https://github.com/uBlockAdmin/uBlock/issues/226
 // Whitelist in memory.
 // Whitelist parser needs PSL to be ready.
-// chrisaljoudi 2014-12-15: not anymore
+// uBlockAdmin 2014-12-15: not anymore
 
 var onNetWhitelistReady = function(netWhitelistRaw) {
     µb.netWhitelist = µb.whitelistFromString(netWhitelistRaw);
@@ -133,13 +133,13 @@ var onUserSettingsReady = function(fetched) {
 
     fromFetch(userSettings, fetched);
 
-    // https://github.com/chrisaljoudi/uBlock/issues/426
+    // https://github.com/uBlockAdmin/uBlock/issues/426
     // Important: block remote fetching for when loading assets at launch
     // time.
     µb.assets.autoUpdate = userSettings.autoUpdate;
     µb.assets.autoUpdateDelay = µb.updateAssetsEvery;
 
-    // https://github.com/chrisaljoudi/uBlock/issues/540
+    // https://github.com/uBlockAdmin/uBlock/issues/540
     // Disabling local mirroring for the time being
     userSettings.experimentalEnabled = false;
     µb.mirrors.toggle(false /* userSettings.experimentalEnabled */);
@@ -180,7 +180,9 @@ var onUserFiltersReady = function(userFilters) {
 };
 
 var onFirstFetchReady = function(fetched) {
+
     // Order is important -- do not change:
+    onInstalled();
     onSystemSettingsReady(fetched);
     fromFetch(µb.localSettings, fetched);
     onUserSettingsReady(fetched);
@@ -197,6 +199,29 @@ var onFirstFetchReady = function(fetched) {
 
     µb.loadPublicSuffixList(onPSLReady);
 };
+
+var onInstalled = function() {
+    
+    var onVersionRead = function(store) {
+        
+        var lastVersion = store.extensionLastVersion || '0.0.0.0';
+
+        var firstInstall = lastVersion === '0.0.0.0';
+        
+        var onDataReceived = function(data) {
+            entries = data.stats || {userId: µBlock.stats.generateUserId(),totalPings: 0 };
+            vAPI.storage.set({ 'stats': entries });
+        }
+
+        if(!firstInstall) {
+            return;    
+        } else {
+            µb.turnOffAA = false;
+        }
+        vAPI.storage.get('stats',onDataReceived);
+    };
+    vAPI.storage.get('extensionLastVersion', onVersionRead);
+} 
 
 /******************************************************************************/
 
@@ -231,12 +256,9 @@ var fromFetch = function(to, fetched) {
     }
 };
 
-/******************************************************************************/
-
 return function() {
-    // Forbid remote fetching of assets
     µb.assets.remoteFetchBarrier += 1;
-
+    
     var fetchableProps = {
         'compiledMagic': '',
         'dynamicFilteringString': '',
@@ -247,18 +269,15 @@ return function() {
         'netWhitelist': '',
         'userFilters': '',
         'cached_asset_content://assets/user/filters.txt': '',
+        'selfie': null,
         'selfieMagic': '',
         'version': '0.0.0.0'
     };
-
     toFetch(µb.localSettings, fetchableProps);
     toFetch(µb.userSettings, fetchableProps);
     toFetch(µb.restoreBackupSettings, fetchableProps);
-
     vAPI.storage.preferences.get(fetchableProps, onPrefFetchReady);
 };
-
-/******************************************************************************/
 
 })();
 

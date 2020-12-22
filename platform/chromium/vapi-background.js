@@ -16,7 +16,7 @@
     You should have received a copy of the GNU General Public License
     along with this program.  If not, see {http://www.gnu.org/licenses/}.
 
-    Home: https://github.com/chrisaljoudi/uBlock
+    Home: https://github.com/uBlockAdmin/uBlock
 */
 
 /* global self, µBlock */
@@ -38,12 +38,33 @@ var manifest = chrome.runtime.getManifest();
 
 vAPI.chrome = true;
 
+vAPI.webextFlavor = '';
+if (
+    self.browser instanceof Object &&
+    typeof self.browser.runtime.getBrowserInfo === 'function'
+) {
+    self.browser.runtime.getBrowserInfo().then(function(info) {
+        vAPI.webextFlavor = info.vendor + '-' + info.name + '-' + info.version;
+    });
+}
+/*
+https://developers.chrome.com/extensions/extensionTypes#type-CSSOrigin (Chromium 66)
+https://developer.mozilla.org/en-US/docs/Mozilla/Add-ons/WebExtensions/API/tabs/insertCSS > Firefox 53 
+*/
+let browserDetails = navigator.userAgent.match(/(opera|chrome|safari|firefox|msie|trident(?=\/))\/?\s*(\d+)/i);
+vAPI.cssOriginSupport = false;
+if(browserDetails.length > 0) {
+    if( (browserDetails[1] == "Firefox" && browserDetails[2] >= 53) || (browserDetails[1] == "Chrome" && browserDetails[2] >= 66)  ) {
+        vAPI.cssOriginSupport = true;
+    }
+}
+
 var noopFunc = function(){};
 
 /******************************************************************************/
 
 vAPI.app = {
-    name: manifest.name,
+    name: manifest.short_name,
     version: manifest.version
 };
 
@@ -72,6 +93,8 @@ vAPI.app.restart = function() {
 
 vAPI.storage = chrome.storage.local;
 vAPI.storage.preferences = vAPI.storage;
+
+
 
 /******************************************************************************/
 
@@ -217,7 +240,9 @@ vAPI.tabs.registerListeners = function() {
         onClosedClient(tabId);
     };
 
-    chrome.webNavigation.onCreatedNavigationTarget.addListener(onCreatedNavigationTarget);
+    if ( chrome.webNavigation.onCreatedNavigationTarget instanceof Object ) {
+        chrome.webNavigation.onCreatedNavigationTarget.addListener(onCreatedNavigationTarget);
+    }
     chrome.webNavigation.onBeforeNavigate.addListener(onBeforeNavigate);
     chrome.webNavigation.onCommitted.addListener(onCommitted);
     chrome.tabs.onUpdated.addListener(onUpdated);
@@ -335,6 +360,11 @@ vAPI.tabs.open = function(details) {
         wrapper();
         return;
     }
+    
+    if ( /^Mozilla-Firefox-5[2-5]\./.test(vAPI.webextFlavor) ) {
+        wrapper();
+        return;
+    }
 
     chrome.tabs.query({ url: targetURL }, function(tabs) {
         var tab = tabs[0];
@@ -428,6 +458,20 @@ vAPI.tabs.injectScript = function(tabId, details, callback) {
     }
 };
 
+vAPI.insertCSS = function(tabId, details , callback) {
+    var onScriptExecuted = function() {
+        // https://code.google.com/p/chromium/issues/detail?id=410868#c8
+        if ( chrome.runtime.lastError ) {
+            /* noop */
+        }
+        if ( typeof callback === 'function' ) {
+            callback();
+        }
+    };
+    if ( tabId ) {
+        chrome.tabs.insertCSS(tabId, details, onScriptExecuted);
+    }
+};
 /******************************************************************************/
 
 var IconState = function(badge, img) {
@@ -449,8 +493,8 @@ var ICON_PATHS = {
 
 // Must read: https://code.google.com/p/chromium/issues/detail?id=410868#c8
 
-// https://github.com/chrisaljoudi/uBlock/issues/19
-// https://github.com/chrisaljoudi/uBlock/issues/207
+// https://github.com/uBlockAdmin/uBlock/issues/19
+// https://github.com/uBlockAdmin/uBlock/issues/207
 // Since we may be called asynchronously, the tab id may not exist
 // anymore, so this ensures it does still exist.
 
@@ -626,7 +670,7 @@ CallbackWrapper.prototype.init = function(port, request) {
 };
 
 CallbackWrapper.prototype.proxy = function(response) {
-    // https://github.com/chrisaljoudi/uBlock/issues/383
+    // https://github.com/uBlockAdmin/uBlock/issues/383
     if ( this.messaging.ports.hasOwnProperty(this.port.name) ) {
         this.port.postMessage({
             requestId: this.request.requestId,
@@ -663,7 +707,7 @@ vAPI.net.registerListeners = function() {
         var tail = µburi.path.slice(-6);
         var pos = tail.lastIndexOf('.');
 
-        // https://github.com/chrisaljoudi/uBlock/issues/862
+        // https://github.com/uBlockAdmin/uBlock/issues/862
         // If no transposition possible, transpose to `object` as per
         // Chromium bug 410382 (see below)
         if ( pos === -1 ) {
@@ -691,6 +735,23 @@ vAPI.net.registerListeners = function() {
         normalizeRequestDetails(details);
         return onBeforeRequestClient(details);
     };
+    
+    var urls, types;
+    urls = this.onBeforeRequest.urls || ['<all_urls>'];
+    types = this.onBeforeRequest.types ||  [];
+    if (
+        (chrome.webRequest.ResourceType.WEBSOCKET == 'websocket') &&
+        (urls.indexOf('<all_urls>') === -1)
+    ) {
+        types.push('websocket');
+        if ( urls.indexOf('ws://*/*') === -1 ) {
+            urls.push('ws://*/*');
+        }
+        if ( urls.indexOf('wss://*/*') === -1 ) {
+            urls.push('wss://*/*');
+        }
+    }
+    
     chrome.webRequest.onBeforeRequest.addListener(
         onBeforeRequest,
         //function(details) {
@@ -785,7 +846,7 @@ vAPI.onLoadAllCompleted = function() {
             tab = tabs[i];
             µb.tabContextManager.commit(tab.id, tab.url);
             µb.bindTabToPageStats(tab.id);
-            // https://github.com/chrisaljoudi/uBlock/issues/129
+            // https://github.com/uBlockAdmin/uBlock/issues/129
             scriptStart(tab.id);
         }
     };

@@ -16,7 +16,7 @@
     You should have received a copy of the GNU General Public License
     along with this program.  If not, see {http://www.gnu.org/licenses/}.
 
-    Home: https://github.com/chrisaljoudi/uBlock
+    Home: https://github.com/uBlockAdmin/uBlock
 */
 
 // For background page or non-background pages
@@ -34,6 +34,25 @@ self.vAPI = self.vAPI || {};
 
 var chrome = self.chrome;
 var vAPI = self.vAPI;
+
+vAPI.browserInfo = { flavor:'', majorVersion: ''};
+
+var browserInfo = vAPI.browserInfo;
+
+var match;
+if ( (match = /\bFirefox\/(\d+)/.exec(navigator.userAgent)) !== null ) {
+    browserInfo.majorVersion = parseInt(match[1], 10) || 0;
+    browserInfo.flavor = 'Firefox';
+} else if ( (match = /\bEdge\/(\d+)/.exec(navigator.userAgent)) !== null ) {
+    browserInfo.majorVersion = parseInt(match[1], 10) || 0;
+    browserInfo.flavor = 'Edge';
+} else if ( (match = /\bChrome\/(\d+)/.exec(navigator.userAgent)) !== null ) {
+    browserInfo.majorVersion = parseInt(match[1], 10) || 0;
+    browserInfo.flavor = 'Chrome';
+} else if ( (match = /\bSafari\/(\d+)/.exec(navigator.userAgent)) !== null ) {
+    browserInfo.majorVersion = parseInt(match[1], 10) || 0;
+    browserInfo.flavor = 'Safari';
+}
 
 /******************************************************************************/
 

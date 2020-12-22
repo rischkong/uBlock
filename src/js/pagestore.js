@@ -16,7 +16,7 @@
     You should have received a copy of the GNU General Public License
     along with this program.  If not, see {http://www.gnu.org/licenses/}.
 
-    Home: https://github.com/chrisaljoudi/uBlock
+    Home: https://github.com/uBlockAdmin/uBlock
 */
 
 /* jshint bitwise: false */
@@ -251,6 +251,7 @@ FrameStore.prototype.init = function(rootHostname, frameURL) {
     this.pageURL = frameURL;
     this.pageHostname = µburi.hostnameFromURI(frameURL);
     this.pageDomain = µburi.domainFromHostname(this.pageHostname) || this.pageHostname;
+    this.pageHostnameHashes = µb.getHostnameHashesFromLabelsBackward(this.pageHostname, this.pageDomain, false);
     return this;
 };
 
@@ -307,9 +308,48 @@ PageStore.prototype.init = function(tabId) {
     // Support `elemhide` filter option. Called at this point so the required
     // context is all setup at this point.
     var context = this.createContextFromPage();
-    this.skipCosmeticFiltering = µb.staticNetFilteringEngine
-                                   .matchStringExactType(context, tabContext.normalURL, 'cosmetic-filtering')
-                                   .charAt(1) === 'b';
+
+    this.skipCosmeticFiltering = false;
+    var result;
+  
+    this.applyDocumentFiltering =  µb.staticNetFilteringEngine.matchStringExceptionOnlyRule(
+        tabContext.normalURL,'main_frame').charAt(1) === 'a';   
+    if(this.applyDocumentFiltering) {
+        this.skipCosmeticFiltering = this.applyDocumentFiltering;
+    }
+
+    if(this.skipCosmeticFiltering !== true) {
+        result = µb.staticNetFilteringEngine.matchStringExceptionOnlyRule(
+            tabContext.normalURL,'cosmetic-filtering');
+        this.skipCosmeticFiltering = result.charAt(1) === 'a';
+    }
+    
+    if(this.skipCosmeticFiltering) {
+        context.requestType = 'elemhide';
+        µb.logger.writeOne(tabId, context, result);    
+    }
+    // Support `generichide` filter option. Called at this point so the required
+    // context is all setup at this point.
+    this.skipGenericFiltering = this.skipCosmeticFiltering;     
+    if ( this.skipGenericFiltering !== true ) {
+        result = µb.staticNetFilteringEngine.matchStringExceptionOnlyRule(
+            tabContext.normalURL,'generichide');
+        this.skipGenericFiltering = result.charAt(1) === 'a';
+        if(this.skipGenericFiltering) {
+            context.requestType = 'generichide';
+            µb.logger.writeOne(tabId, context, result);   
+        }
+    }
+
+    result = µb.staticNetFilteringEngine.matchStringExceptionOnlyRule(
+        tabContext.normalURL,'genericblock');
+    
+    this.skipGenericBlocking = result.charAt(1) === 'a';
+
+    if(this.skipGenericBlocking) {
+        context.requestType = 'genericblock';
+        µb.logger.writeOne(tabId, context, result);   
+    }
 
     return this;
 };
@@ -335,7 +375,7 @@ PageStore.prototype.reuse = function(context) {
     // video thumbnail would not work, because the frame hierarchy structure
     // was flushed from memory, while not really being flushed on the page.
     if ( context === 'tabUpdated' ) {
-        // As part of https://github.com/chrisaljoudi/uBlock/issues/405
+        // As part of https://github.com/uBlockAdmin/uBlock/issues/405
         // URL changed, force a re-evaluation of filtering switch
         this.netFilteringReadTime = 0;
         return this;
@@ -401,6 +441,7 @@ PageStore.prototype.createContextFromPage = function() {
     var context = new µb.tabContextManager.createContext(this.tabId);
     context.pageHostname = context.rootHostname;
     context.pageDomain = context.rootDomain;
+    context.pageHostnameHashes = context.rootHostnameHashes;
     return context;
 };
 
@@ -410,9 +451,11 @@ PageStore.prototype.createContextFromFrameId = function(frameId) {
         var frameStore = this.frames[frameId];
         context.pageHostname = frameStore.pageHostname;
         context.pageDomain = frameStore.pageDomain;
+        context.pageHostnameHashes = frameStore.pageHostnameHashes;
     } else {
         context.pageHostname = context.rootHostname;
         context.pageDomain = context.rootDomain;
+        context.pageHostnameHashes = context.rootHostnameHashes;
     }
     return context;
 };
@@ -421,6 +464,7 @@ PageStore.prototype.createContextFromFrameHostname = function(frameHostname) {
     var context = new µb.tabContextManager.createContext(this.tabId);
     context.pageHostname = frameHostname;
     context.pageDomain = µb.URI.domainFromHostname(frameHostname) || frameHostname;
+    context.pageHostnameHashes = µb.getHostnameHashesFromLabelsBackward(context.pageHostname, context.pageDomain, false);
     return context;
 };
 
@@ -435,7 +479,7 @@ PageStore.prototype.getNetFilteringSwitch = function() {
         return this.netFiltering;
     }
 
-    // https://github.com/chrisaljoudi/uBlock/issues/1078
+    // https://github.com/uBlockAdmin/uBlock/issues/1078
     // Use both the raw and normalized URLs.
     this.netFiltering = µb.getNetFilteringSwitch(tabContext.normalURL);
     if ( this.netFiltering && tabContext.rawURL !== tabContext.normalURL ) {
@@ -461,7 +505,7 @@ PageStore.prototype.getSpecificCosmeticFilteringSwitch = function() {
 /******************************************************************************/
 
 PageStore.prototype.getGenericCosmeticFilteringSwitch = function() {
-    if ( this.skipCosmeticFiltering ) {
+    if ( this.skipCosmeticFiltering || this.skipGenericFiltering) {
         return false;
     }
     return this.getSpecificCosmeticFilteringSwitch();
@@ -510,7 +554,8 @@ PageStore.prototype.filterRequest = function(context) {
     }
 
     // Static filtering never override dynamic filtering
-    if ( result === '' ) {
+    if ( result === '' && !this.applyDocumentFiltering) {
+        context.skipGenericBlocking = this.skipGenericBlocking;
         result = µb.staticNetFilteringEngine.matchString(context);
     }
 
@@ -553,8 +598,10 @@ PageStore.prototype.filterRequestNoCache = function(context) {
     }
 
     // Static filtering never override dynamic filtering
-    if ( result === '' ) {
+    if ( result === '' && !this.applyDocumentFiltering) {
+        context.skipGenericBlocking = this.skipGenericBlocking;
         result = µb.staticNetFilteringEngine.matchString(context);
+        µb.staticNetFilteringEngine.matchAndFetchCspData(context);
     }
 
     return result;

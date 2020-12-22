@@ -16,7 +16,7 @@
     You should have received a copy of the GNU General Public License
     along with this program.  If not, see {http://www.gnu.org/licenses/}.
 
-    Home: https://github.com/chrisaljoudi/uBlock
+    Home: https://github.com/uBlockAdmin/uBlock
 */
 /******************************************************************************/
 // For non background pages
@@ -151,7 +151,7 @@
     };
 
     // The following code should run only in content pages
-    if(location.protocol === "safari-extension:" || typeof safari !== "object") {
+    if(location.protocol === "safari-extension:" || typeof safari !== "object" || typeof safari.self !== "object") {
         return;
     }
 
@@ -248,8 +248,8 @@
 var block = function(u, t) {" +
 (legacyMode ?
 "var e = document.createEvent('CustomEvent');\
-e.initCustomEvent('" + vAPI.sessionId + "', false, false, {url: u, type: t});"
-: "var e = new CustomEvent('" + vAPI.sessionId + "', {bubbles: false, detail: {url: u, type: t}});"
+e.initCustomEvent('" + vAPI.sessionId + "', false, false, {url: String(u), type: t});"
+: "var e = new CustomEvent('" + vAPI.sessionId + "', {bubbles: false, detail: {url: String(u), type: t}});"
 ) +
 "document.documentElement.setAttribute('data-ublock-blocked', '');\
 document.dispatchEvent(e);\

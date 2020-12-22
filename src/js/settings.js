@@ -16,7 +16,7 @@
     You should have received a copy of the GNU General Public License
     along with this program.  If not, see {http://www.gnu.org/licenses/}.
 
-    Home: https://github.com/chrisaljoudi/uBlock
+    Home: https://github.com/uBlockAdmin/uBlock
 */
 
 /* global vAPI, uDom */
@@ -99,14 +99,32 @@ var startImportFilePicker = function() {
 /******************************************************************************/
 
 var exportToFile = function() {
-    messager.send({ what: 'backupUserData' }, onLocalDataReceived);
+    //messager.send({ what: 'backupUserData' }, onLocalDataReceived);
+    messager.send({ what: 'backupUserData' }, function(response) {
+        if (
+            response instanceof Object === false ||
+            response.userData instanceof Object === false
+        ) {
+            return;
+        }
+        vAPI.download({
+            'url': 'data:text/plain;charset=utf-8,' +
+                   encodeURIComponent(JSON.stringify(response.userData, null, '  ')),
+            'filename': response.localData.lastBackupFile
+        });
+        onLocalDataReceived(response.localData);
+    });
 };
 
 /******************************************************************************/
 
 var onLocalDataReceived = function(details) {
     uDom('#localData > ul > li:nth-of-type(1)').text(
-        vAPI.i18n('settingsStorageUsed').replace('{{value}}', details.storageUsed.toLocaleString())
+        vAPI.i18n('settingsStorageUsed')
+        .replace(
+            '{{value}}',
+            typeof details.storageUsed === 'number' ? details.storageUsed.toLocaleString() : '?'
+        )
     );
 
     var elem, dt;
@@ -185,7 +203,11 @@ var onUserSettingsReceived = function(details) {
         .on('change', function(){
             changeUserSettings('advancedUserEnabled', this.checked);
         });
-
+    uDom('#allow-user-stats')
+        .prop('checked', details.allowUserStats === true)
+        .on('change', function(){
+            changeUserSettings('allowUserStats', this.checked);
+        });    
     uDom('#experimental-enabled')
         .prop('checked', details.experimentalEnabled === true)
         .on('change', function(){

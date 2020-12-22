@@ -3,6 +3,10 @@
     "message":"uBlock",
     "description":"extension name."
   },
+  "extShortName": {
+    "message": "uBlock",
+    "description": "extension short name."
+  },
   "extShortDesc":{
     "message":"Cuối cùng, đã có một công cụ chặn quảng cáo hiệu quả, tiêu tốn ít CPU và bộ nhớ.",
     "description":"this will be in the chrome web store: must be 132 characters or less"
@@ -160,11 +164,15 @@
     "description":"English: Make use of context menu where appropriate"
   },
   "settingsAdvancedUserPrompt":{
-    "message":"Tôi là một người dùng có kinh nghiệm (<a href='https:\/\/github.com\/chrisaljoudi\/uBlock\/wiki\/Advanced-Mode'>Yêu cầu đọc qua<\/a>)",
+    "message":"Tôi là một người dùng có kinh nghiệm (<a href='https:\/\/github.com\/uBlockAdmin\/uBlock\/wiki\/Advanced-Mode'>Yêu cầu đọc qua<\/a>)",
     "description":"English: "
   },
+  "settingsAllowUserStats":{
+    "message":"Allow uBlock to collect anonymous ping and usage data.",
+    "description":"English: Allow uBlock to collect anonymous ping and usage data."
+  },
   "settingsExperimentalPrompt":{
-    "message":"Kích hoạt các tính năng thử nghiệm (<a href='https:\/\/github.com\/chrisaljoudi\/uBlock\/wiki\/Experimental-features'>Thông tin<\/a>)",
+    "message":"Kích hoạt các tính năng thử nghiệm (<a href='https:\/\/github.com\/uBlockAdmin\/uBlock\/wiki\/Experimental-features'>Thông tin<\/a>)",
     "description":"English: Enable experimental features"
   },
   "settingsStorageUsed":{
@@ -332,7 +340,7 @@
     "description":"English: List of your dynamic filtering rules."
   },
   "rulesFormatHint":{
-    "message":"Quy tắc cú pháp: <code>nguồn đích loại hành động<\/code> (<a href='https:\/\/github.com\/chrisaljoudi\/uBlock\/wiki\/Dynamic-filtering:-rule-syntax'>tài liệu đầy đủ<\/a>).",
+    "message":"Quy tắc cú pháp: <code>nguồn đích loại hành động<\/code> (<a href='https:\/\/github.com\/uBlockAdmin\/uBlock\/wiki\/Dynamic-filtering:-rule-syntax'>tài liệu đầy đủ<\/a>).",
     "description":"English: dynamic rule syntax and full documentation."
   },
   "whitelistPrompt":{
@@ -526,5 +534,9 @@
   "dummy":{
     "message":"Đây là mục cuối",
     "description":"so we dont need to deal with comma for last entry"
+  },
+  "rateus": {
+    "message": "Rate Us!",
+    "description": "English: Rate Us!"
   }
 }

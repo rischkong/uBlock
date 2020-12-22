@@ -16,7 +16,7 @@
     You should have received a copy of the GNU General Public License
     along with this program.  If not, see {http://www.gnu.org/licenses/}.
 
-    Home: https://github.com/chrisaljoudi/uBlock
+    Home: https://github.com/uBlockAdmin/uBlock
 */
 
 /* global µBlock, vAPI */
@@ -35,6 +35,10 @@ var exports = {};
 
 /******************************************************************************/
 
+let clearCacheInResponseHeaders = (vAPI.browserInfo.flavor == "Firefox" ? true : false);
+   
+let injectCSPHeaders =  (vAPI.browserInfo.flavor == "Firefox" && vAPI.browserInfo.majorVersion < 59 ? true : false);
+
 // Intercept and filter web requests.
 
 var onBeforeRequest = function(details) {
@@ -42,7 +46,7 @@ var onBeforeRequest = function(details) {
     //console.debug('µBlock.webRequest/onBeforeRequest(): "type=%s, id=%d, parent id=%d, url=%s', details.type, details.frameId, details.parentFrameId, details.url);
 
     // Special handling for root document.
-    // https://github.com/chrisaljoudi/uBlock/issues/1001
+    // https://github.com/uBlockAdmin/uBlock/issues/1001
     // This must be executed regardless of whether the request is
     // behind-the-scene
     var requestType = details.type;
@@ -68,7 +72,7 @@ var onBeforeRequest = function(details) {
         pageStore = µb.pageStoreFromTabId(tabId);
     }
 
-    // https://github.com/chrisaljoudi/uBlock/issues/886
+    // https://github.com/uBlockAdmin/uBlock/issues/886
     // For requests of type `sub_frame`, the parent frame id must be used
     // to lookup the proper context:
     // > If the document of a (sub-)frame is loaded (type is main_frame or
@@ -78,13 +82,14 @@ var onBeforeRequest = function(details) {
     var isFrame = requestType === 'sub_frame';
     var frameId = isFrame ? details.parentFrameId : details.frameId;
 
-    // https://github.com/chrisaljoudi/uBlock/issues/114
+    // https://github.com/uBlockAdmin/uBlock/issues/114
     var requestContext = pageStore.createContextFromFrameId(frameId);
 
     // Setup context and evaluate
     var requestURL = details.url;
     requestContext.requestURL = requestURL;
     requestContext.requestHostname = details.hostname;
+    requestContext.requestDomain = µb.URI.domainFromHostname(requestContext.requestHostname);
     requestContext.requestType = requestType;
 
     var result = pageStore.filterRequest(requestContext);
@@ -98,7 +103,7 @@ var onBeforeRequest = function(details) {
     if ( µb.isAllowResult(result) ) {
         //console.debug('traffic.js > onBeforeRequest(): ALLOW "%s" (%o) because "%s"', details.url, details, result);
 
-        // https://github.com/chrisaljoudi/uBlock/issues/114
+        // https://github.com/uBlockAdmin/uBlock/issues/114
         frameId = details.frameId;
         if ( frameId > 0 ) {
             if ( isFrame  ) {
@@ -114,13 +119,13 @@ var onBeforeRequest = function(details) {
     // Blocked
     //console.debug('traffic.js > onBeforeRequest(): BLOCK "%s" (%o) because "%s"', details.url, details, result);
 
-    // https://github.com/chrisaljoudi/uBlock/issues/905#issuecomment-76543649
+    // https://github.com/uBlockAdmin/uBlock/issues/905#issuecomment-76543649
     // No point updating the badge if it's not being displayed.
     if ( µb.userSettings.showIconBadge ) {
         µb.updateBadgeAsync(tabId);
     }
 
-    // https://github.com/chrisaljoudi/uBlock/issues/18
+    // https://github.com/uBlockAdmin/uBlock/issues/18
     // Do not use redirection, we need to block outright to be sure the request
     // will not be made. There can be no such guarantee with redirection.
 
@@ -145,6 +150,7 @@ var onBeforeRootFrameRequest = function(details) {
         pageDomain: requestDomain,
         requestURL: requestURL,
         requestHostname: requestHostname,
+        requestDomain: requestDomain,
         requestType: 'main_frame'
     };
 
@@ -214,6 +220,7 @@ var onBeforeBehindTheSceneRequest = function(details) {
     var context = pageStore.createContextFromPage();
     context.requestURL = details.url;
     context.requestHostname = details.hostname;
+    context.requestDomain = µb.URI.domainFromHostname(context.requestHostname);
     context.requestType = details.type;
 
     // Blocking behind-the-scene requests can break a lot of stuff: prevent
@@ -269,26 +276,28 @@ var onHeadersReceived = function(details) {
     var context = pageStore.createContextFromFrameId(details.parentFrameId);
     context.requestURL = details.url;
     context.requestHostname = details.hostname;
+    context.requestDomain = µb.URI.domainFromHostname(context.requestHostname);
     context.requestType = 'inline-script';
-
+    µb.staticNetFilteringEngine.cspSubsets = new Map();
     var result = pageStore.filterRequestNoCache(context);
 
     pageStore.logRequest(context, result);
     µb.logger.writeOne(tabId, context, result);
+    
+    var addCsp = [];
 
-    // Don't block
-    if ( µb.isAllowResult(result) ) {
-        return;
+    if ( µb.isAllowResult(result)) {
+        if(µb.staticNetFilteringEngine.cspSubsets.size === 0)
+            return;
+    }
+    else {
+        addCsp.push("script-src 'unsafe-eval' *");
     }
 
-    µb.updateBadgeAsync(tabId);
+    modifyHeaderToAddCsp(pageStore,context,details,addCsp);
+    µb.updateBadgeAsync(tabId);    
 
-    details.responseHeaders.push({
-        'name': 'Content-Security-Policy',
-        'value': "script-src 'unsafe-eval' *"
-    });
-
-    return { 'responseHeaders': details.responseHeaders };
+    return { 'responseHeaders': details.responseHeaders };    
 };
 
 /******************************************************************************/
@@ -304,7 +313,7 @@ var onRootFrameHeadersReceived = function(details) {
     // We will assume that whatever root document is of type
     //   'application/x-[...]' is a download operation.
     // I confirmed this also work with original issue:
-    //   https://github.com/chrisaljoudi/uBlock/issues/516
+    //   https://github.com/uBlockAdmin/uBlock/issues/516
     if ( headerValue(details.responseHeaders, 'content-type').lastIndexOf('application/x-', 0) === 0 ) {
         µb.tabContextManager.unpush(tabId, requestURL);
     } else {
@@ -320,29 +329,91 @@ var onRootFrameHeadersReceived = function(details) {
     var context = pageStore.createContextFromPage();
     context.requestURL = requestURL;
     context.requestHostname = requestHostname;
+    context.requestDomain = µb.URI.domainFromHostname(context.requestHostname);
     context.requestType = 'inline-script';
 
+    µb.staticNetFilteringEngine.cspSubsets = new Map();
     var result = pageStore.filterRequestNoCache(context);
 
     pageStore.logRequest(context, result);
     µb.logger.writeOne(tabId, context, result);
+    
+    var addCsp = [];
 
-    // Don't block
-    if ( µb.isAllowResult(result) ) {
-        return;
+    if ( µb.isAllowResult(result)) {
+        if(µb.staticNetFilteringEngine.cspSubsets.size === 0)
+            return;
+    }
+    else {
+        addCsp.push("script-src 'unsafe-eval' *");
     }
 
+    modifyHeaderToAddCsp(pageStore,context,details,addCsp);
     µb.updateBadgeAsync(tabId);
-
-    details.responseHeaders.push({
-        'name': 'Content-Security-Policy',
-        'value': "script-src 'unsafe-eval' *"
-    });
 
     return { 'responseHeaders': details.responseHeaders };
 };
 
+var modifyHeaderToAddCsp = function(pageStore,context,details,addCsp) {
+
+    var cspSubsets = [];
+    var µb = µBlock;
+    var tabId = details.tabId;
+    let headers = details.responseHeaders;
+
+    if ( addCsp.length !== 0 ) {
+        cspSubsets[0] = addCsp.join('; ');
+    }
+   
+    for (let key of µb.staticNetFilteringEngine.cspSubsets.keys()) {
+        cspSubsets.push(key);
+    }
+    
+    if(cspSubsets.length > 0) {
+        for(let [key, value] of µb.staticNetFilteringEngine.cspSubsets.entries()) {
+            var result = 'sb:' + value; 
+            context.requestType = 'csp';
+            µb.logger.writeOne(tabId, context, result);
+        }
+        pageStore.logRequest(context, result);
+    }
+    
+    if ( injectCSPHeaders ) {
+        let i = headerIndex('content-security-policy', headers);
+        if ( i !== -1 ) {
+            cspSubsets.unshift(headers[i].value.trim());
+            headers.splice(i, 1);
+        }
+    }
+
+    if ( cspSubsets.length > 0 && clearCacheInResponseHeaders ) {
+        let i = headerIndex('cache-control', headers);
+        if ( i !== -1 ) {
+            headers[i].value = 'no-cache, no-store, must-revalidate';
+        } else {
+            headers[headers.length] = {
+                name: 'Cache-Control',
+                value: 'no-cache, no-store, must-revalidate'
+            };
+        }
+    }
+
+    headers.push({
+        name: 'Content-Security-Policy',
+        value: cspSubsets.join(', ')
+    });
+}
 /******************************************************************************/
+
+var headerIndex = function(headerName, headers) {
+    var i = headers.length;
+    while ( i-- ) {
+        if ( headers[i].name.toLowerCase() === headerName ) {
+            return i;
+        }
+    }
+    return -1;
+};
 
 var headerValue = function(headers, name) {
     var i = headers.length;
@@ -369,6 +440,7 @@ vAPI.net.onBeforeRequest = {
         "image",
         "object",
         "xmlhttprequest",
+        "ping",
         "other"
     ],
     extra: [ 'blocking' ],

@@ -16,7 +16,7 @@
     You should have received a copy of the GNU General Public License
     along with this program.  If not, see {http://www.gnu.org/licenses/}.
 
-    Home: https://github.com/chrisaljoudi/uBlock
+    Home: https://github.com/uBlockAdmin/uBlock
 */
 
 /* jshint multistr: true */
@@ -34,7 +34,7 @@
 
 /******************************************************************************/
 
-// https://github.com/chrisaljoudi/uBlock/issues/464
+// https://github.com/uBlockAdmin/uBlock/issues/464
 if ( document instanceof HTMLDocument === false ) {
     //console.debug('contentscript-start.js > not a HTLMDocument');
     return false;
@@ -46,7 +46,7 @@ if ( !vAPI ) {
     return;
 }
 
-// https://github.com/chrisaljoudi/uBlock/issues/456
+// https://github.com/uBlockAdmin/uBlock/issues/456
 // Already injected?
 if ( vAPI.contentscriptStartInjected ) {
     //console.debug('contentscript-start.js > content script already injected');
@@ -54,6 +54,11 @@ if ( vAPI.contentscriptStartInjected ) {
 }
 vAPI.contentscriptStartInjected = true;
 vAPI.styles = vAPI.styles || [];
+vAPI.userStyles = vAPI.userStyles || [];
+vAPI.injectedProcedureCosmeticFilters = vAPI.injectedProcedureCosmeticFilters || [];
+vAPI.shouldObserveAttributes = false;
+vAPI.shouldObserveCharacterData = false;
+
 
 /******************************************************************************/
 
@@ -66,60 +71,60 @@ var localMessager = vAPI.messaging.channel('contentscript-start.js');
 // These can be inserted before the DOM is loaded.
 
 var cosmeticFilters = function(details) {
-    var donthideCosmeticFilters = {};
-    var hideCosmeticFilters = {};
-    var donthide = details.cosmeticDonthide;
-    var hide = details.cosmeticHide;
-    var i;
-    if ( donthide.length !== 0 ) {
-        i = donthide.length;
-        while ( i-- ) {
-            donthideCosmeticFilters[donthide[i]] = true;
+    let hide = details.cosmeticHide;
+    let userCss = details.cosmeticUserCss;
+    let injectedHide = details.injectedSelectors;
+    let injectedUserCss = details.injectedUserCss;
+
+    let hideProcedureFilters = details.procedureHide || [];
+    let highGenerics = details.highGenerics;
+    vAPI.donthideCosmeticFilters = details.cosmeticDonthide || [];
+    vAPI.cosmeticUserCss = details.cosmeticUserCss;
+    vAPI.hideCosmeticFilters = details.cosmeticHide;
+    vAPI.injectedSelectors = details.injectedSelectors;
+    vAPI.hideProcedureFilters = hideProcedureFilters;
+    vAPI.shouldObserveAttributes = details.shouldObserveAttributes;
+    vAPI.shouldObserveCharacterData = details.shouldObserveCharacterData;
+    let highGenericsArray = [];
+    if(highGenerics) {
+        if(highGenerics.hideLow.length > 0) {
+            highGenericsArray.push(...highGenerics.hideLow);
+        }
+        if(highGenerics.hideMedium.length > 0) {
+            highGenericsArray.push(...highGenerics.hideMedium);
+        }
+        if(highGenerics.hideHigh.length > 0) {
+            highGenericsArray.push(...highGenerics.hideHigh);
+        }
+        if(highGenericsArray.length > 0) {
+            vAPI.userStyleSheet.addCssRule(highGenericsArray.join(',\n') + '\n{display:none !important;}');
+            vAPI.styles.push(highGenericsArray.join(',\n'));
         }
     }
-    // https://github.com/chrisaljoudi/uBlock/issues/143
+    if(userCss.length !== 0) {
+        vAPI.userStyleSheet.addCssRule(userCss.join(',\n'));
+        vAPI.userStyles.push(userCss.join(',\n'));
+    }
+    if(injectedUserCss.length !== 0) {
+        vAPI.userStyles.push(injectedUserCss.join(',\n'));
+    }
     if ( hide.length !== 0 ) {
-        i = hide.length;
-        var selector;
-        while ( i-- ) {
-            selector = hide[i];
-            if ( donthideCosmeticFilters[selector] ) {
-                hide.splice(i, 1);
-            } else {
-                hideCosmeticFilters[selector] = true;
-            }
-        }
+        vAPI.userStyleSheet.addCssRule(hide.join(',\n') + '\n{display:none !important;}');
+        vAPI.styles.push(hide.join(',\n'));
+        hideElements(hide.concat(highGenericsArray).join(',\n'));
     }
-    if ( hide.length !== 0 ) {
-        var text = hide.join(',\n');
-        hideElements(text);
-        var style = vAPI.specificHideStyle = document.createElement('style');
-        // The linefeed before the style block is very important: do not remove!
-        style.appendChild(document.createTextNode(text + '\n{display:none !important;}'));
-        //console.debug('µBlock> "%s" cosmetic filters: injecting %d CSS rules:', details.domain, details.hide.length, hideStyleText);
-        var parent = document.head || document.documentElement;
-        if ( parent ) {
-            parent.appendChild(style);
-            vAPI.styles.push(style);
-        }
+    if(injectedHide.length !== 0) {
+        vAPI.styles.push(injectedHide.join(',\n'));
     }
-    vAPI.donthideCosmeticFilters = donthideCosmeticFilters;
-    vAPI.hideCosmeticFilters = hideCosmeticFilters;
+    
 };
 
 var netFilters = function(details) {
-    var parent = document.head || document.documentElement;
-    if ( !parent ) {
-        return;
-    }
-    var style = document.createElement('style');
-    var text = details.netHide.join(',\n');
-    var css = details.netCollapse ?
+   var text = details.netHide.join(',\n');
+   var css = details.netCollapse ?
         '\n{display:none !important;}' :
         '\n{visibility:hidden !important;}';
-    style.appendChild(document.createTextNode(text + css));
-    parent.appendChild(style);
-    //console.debug('document.querySelectorAll("%s") = %o', text, document.querySelectorAll(text));
+   vAPI.userStyleSheet.addCssRule(text + css);
 };
 
 var filteringHandler = function(details) {
@@ -127,7 +132,7 @@ var filteringHandler = function(details) {
 
     vAPI.skipCosmeticFiltering = !details || details.skipCosmeticFiltering;
     if ( details ) {
-        if ( details.cosmeticHide.length !== 0 || details.cosmeticDonthide.length !== 0 ) {
+        if ( details.cosmeticHide.length !== 0 || details.cosmeticDonthide.length !== 0 || details.procedureHide !== 0 || details.cosmeticUserCss !== 0) {
             cosmeticFilters(details);
         }
         if ( details.netHide.length !== 0 ) {
@@ -141,7 +146,7 @@ var filteringHandler = function(details) {
         localMessager.send({ what: 'cosmeticFiltersActivated' });
     }
 
-    // https://github.com/chrisaljoudi/uBlock/issues/587
+    // https://github.com/uBlockAdmin/uBlock/issues/587
     // If no filters were found, maybe the script was injected before uBlock's
     // process was fully initialized. When this happens, pages won't be
     // cleaned right after browser launch.
@@ -156,12 +161,13 @@ var hideElements = function(selectors) {
     if ( document.body === null ) {
         return;
     }
-    // https://github.com/chrisaljoudi/uBlock/issues/158
+    // https://github.com/uBlockAdmin/uBlock/issues/158
     // Using CSSStyleDeclaration.setProperty is more reliable
     var elems = document.querySelectorAll(selectors);
     var i = elems.length;
     while ( i-- ) {
         elems[i].style.setProperty('display', 'none', 'important');
+        vAPI.hiddenNodesMutation.addNodeToObserver(elems[i]);
     }
 };
 
@@ -170,7 +176,8 @@ localMessager.send(
     {
         what: 'retrieveDomainCosmeticSelectors',
         pageURL: url,
-        locationURL: url
+        locationURL: url,
+        procedureSelectorsOnly: false
     },
     filteringHandler
 );

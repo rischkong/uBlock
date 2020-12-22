@@ -16,7 +16,7 @@
     You should have received a copy of the GNU General Public License
     along with this program.  If not, see {http://www.gnu.org/licenses/}.
 
-    Home: https://github.com/chrisaljoudi/uBlock
+    Home: https://github.com/uBlockAdmin/uBlock
 */
 
 /* global vAPI */
@@ -64,9 +64,10 @@ return {
         parseAllABPHideFilters: true,
         requestLogMaxEntries: 1000,
         showIconBadge: true,
+        allowUserStats:true
     },
 
-    // https://github.com/chrisaljoudi/uBlock/issues/180
+    // https://github.com/uBlockAdmin/uBlock/issues/180
     // Whitelist directives need to be loaded once the PSL is available
     netWhitelist: {},
     netWhitelistModifyTime: 0,
@@ -78,7 +79,7 @@ return {
         'loopconversation.about-scheme',
         'opera-scheme'
     ].join('\n').trim(),
-    
+
     userFiltersPath: "assets/user/filters.txt",
 
     localSettings: {
@@ -90,10 +91,9 @@ return {
 
     // read-only
     systemSettings: {
-        compiledMagic: 'eopszukpnrct',
-        selfieMagic: 'menhiasrxfed'
+        compiledMagic: 'wertpszukpslkkk',
+        selfieMagic: 'werthiasrslkkk'
     },
-
     restoreBackupSettings: {
         lastRestoreFile: '',
         lastRestoreTime: 0,
@@ -104,9 +104,8 @@ return {
     // EasyList, EasyPrivacy and many others have an 4-day update period,
     // as per list headers.
     updateAssetsEvery: 97 * oneHour,
-    projectServerRoot: 'https://raw.githubusercontent.com/chrisaljoudi/uBlock/master/',
+    projectServerRoot: 'https://raw.githubusercontent.com/uBlock-LLC/uBlock/master/',
     pslPath: 'assets/thirdparties/publicsuffix.org/list/effective_tld_names.dat',
-
     // permanent lists
     permanentLists: {
         // User
@@ -128,7 +127,7 @@ return {
     remoteBlacklists: {
     },
 
-    selfieAfter: 23 * oneMinute,
+    selfieAfter: 10 * oneMinute,
 
     pageStores: {},
 
@@ -145,7 +144,8 @@ return {
     epickerEprom: null,
 
     // so that I don't have to care for last comma
-    dummy: 0
+    dummy: 0,
+    turnOffAA: true
 };
 
 /******************************************************************************/
@@ -153,4 +153,3 @@ return {
 })();
 
 /******************************************************************************/
-

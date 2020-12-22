@@ -16,7 +16,7 @@
     You should have received a copy of the GNU General Public License
     along with this program.  If not, see {http://www.gnu.org/licenses/}.
 
-    Home: https://github.com/chrisaljoudi/uBlock
+    Home: https://github.com/uBlockAdmin/uBlock
 */
 
 /* global µBlock, vAPI */
@@ -38,7 +38,7 @@ var onMessage = function(request, sender, callback) {
     // Async
     switch ( request.what ) {
         case 'getAssetContent':
-            // https://github.com/chrisaljoudi/uBlock/issues/417
+            // https://github.com/uBlockAdmin/uBlock/issues/417
             µb.assets.get(request.url, callback);
             return;
 
@@ -303,7 +303,7 @@ var onMessage = function(request, sender, callback) {
                 return;
             }
             vAPI.tabs.get(request.tabId, function(tab) {
-                // https://github.com/chrisaljoudi/uBlock/issues/1012
+                // https://github.com/uBlockAdmin/uBlock/issues/1012
                 callback(getStats(getTargetTabId(tab), tab ? tab.title : ''));
             });
             return;
@@ -401,15 +401,23 @@ var onMessage = function(request, sender, callback) {
     // Sync
     var response;
 
-    var pageStore;
+    var pageStore, tabId, frameId;
+ 
     if ( sender && sender.tab ) {
+        tabId = sender.tab.id;
+        frameId = sender.frameId;
         pageStore = µb.pageStoreFromTabId(sender.tab.id);
     }
 
     switch ( request.what ) {
         case 'retrieveDomainCosmeticSelectors':
-            if ( pageStore && pageStore.getSpecificCosmeticFilteringSwitch() ) {
-                response = µb.cosmeticFilteringEngine.retrieveDomainSelectors(request);
+            request.tabId = tabId;
+            request.frameId = frameId;
+            if ( pageStore && pageStore.getSpecificCosmeticFilteringSwitch() && !pageStore.applyDocumentFiltering ) {
+                var options = {
+                    skipCosmeticFiltering: pageStore.skipCosmeticFiltering                    
+                };
+                response = µb.cosmeticFilteringEngine.retrieveDomainSelectors(request,options);
             }
             break;
 
@@ -474,6 +482,7 @@ var filterRequests = function(pageStore, details) {
         request = requests[i];
         context.requestURL = vAPI.punycodeURL(request.url);
         context.requestHostname = µburi.hostnameFromURI(request.url);
+        context.requestDomain = µburi.domainFromHostname(context.requestHostname);
         context.requestType = tagNameToRequestTypeMap[request.tagName];
         if ( isBlockResult(pageStore.filterRequest(context)) ) {
             request.collapse = true;
@@ -494,18 +503,22 @@ var onMessage = function(request, sender, callback) {
     // Sync
     var response;
 
-    var pageStore;
+    var pageStore, tabId, frameId;
     if ( sender && sender.tab ) {
+        tabId = sender.tab.id;
+        frameId = sender.frameId;
         pageStore = µb.pageStoreFromTabId(sender.tab.id);
     }
 
     switch ( request.what ) {
         case 'retrieveGenericCosmeticSelectors':
+            request.tabId = tabId;
+            request.frameId = frameId;
             response = {
                 shutdown: !pageStore || !pageStore.getNetFilteringSwitch(),
                 result: null
             };
-            if ( !response.shutdown && pageStore.getGenericCosmeticFilteringSwitch() ) {
+            if ( !response.shutdown && pageStore.getGenericCosmeticFilteringSwitch() && !pageStore.applyDocumentFiltering) {
                 response.result = µb.cosmeticFilteringEngine.retrieveGenericSelectors(request);
             }
             break;
@@ -516,11 +529,30 @@ var onMessage = function(request, sender, callback) {
                 shutdown: !pageStore || !pageStore.getNetFilteringSwitch(),
                 result: null
             };
-            if(!response.shutdown) {
+            if(!response.shutdown && !pageStore.applyDocumentFiltering) {
                 response.result = filterRequests(pageStore, request);
             }
             break;
-
+        case 'injectCSS':
+            request.tabId = tabId;
+            request.frameId = frameId;
+            const details = {
+                code: '',
+                cssOrigin: 'user',
+                frameId: request.frameId,
+                runAt: 'document_start'
+            };
+            response = {
+                shutdown: !pageStore || !pageStore.getNetFilteringSwitch(),
+                result: null
+            };
+            if(!response.shutdown && !pageStore.applyDocumentFiltering) {
+                if ( request.selectors != "" ) {
+                    details.code = request.selectors;
+                    vAPI.insertCSS(request.tabId, details);
+                }
+            }
+            break;
         default:
             return vAPI.messaging.UNHANDLED;
     }
@@ -567,6 +599,11 @@ var logCosmeticFilters = function(tabId, details) {
     for ( var i = 0; i < selectors.length; i++ ) {
         µb.logger.writeOne(tabId, context, 'cb:##' + selectors[i]);
     }
+    var userStyles = details.matchedUserStyle;
+    for ( var i = 0; i < userStyles.length; i++ ) {
+        µb.logger.writeOne(tabId, context, 'cb:#@#' + userStyles[i]);
+    }
+
 };
 
 /******************************************************************************/
@@ -863,7 +900,7 @@ var onMessage = function(request, sender, callback) {
             break;
 
         case 'setSessionFirewallRules':
-            // https://github.com/chrisaljoudi/uBlock/issues/772
+            // https://github.com/uBlockAdmin/uBlock/issues/772
             µb.cosmeticFilteringEngine.removeFromSelectorCache('*');
 
             µb.sessionFirewall.fromString(request.rules);
@@ -1075,17 +1112,13 @@ var backupUserData = function(callback) {
         var filename = vAPI.i18n('aboutBackupFilename')
             .replace('{{datetime}}', now.toLocaleString())
             .replace(/ +/g, '_');
-
-        vAPI.download({
-            'url': 'data:text/plain;charset=utf-8,' + encodeURIComponent(JSON.stringify(userData, null, '  ')),
-            'filename': filename
-        });
-
         µb.restoreBackupSettings.lastBackupFile = filename;
         µb.restoreBackupSettings.lastBackupTime = Date.now();
         vAPI.storage.preferences.set(µb.restoreBackupSettings);
-
-        getLocalData(callback);
+        
+        getLocalData(function(localData) {
+            callback({ localData: localData, userData: userData });
+        });
     };
 
     var onUserFiltersReady = function(details) {
@@ -1100,7 +1133,7 @@ var backupUserData = function(callback) {
 
 var restoreUserData = function(request) {
     var userData = request.userData;
-    var countdown = 7;
+    var countdown = 6;
     var onCountdown = function() {
         countdown -= 1;
         if ( countdown === 0 ) {
@@ -1130,7 +1163,7 @@ var restoreUserData = function(request) {
         }, onCountdown);
     };
 
-    // https://github.com/chrisaljoudi/uBlock/issues/1102
+    // https://github.com/uBlockAdmin/uBlock/issues/1102
     // Ensure all currently cached assets are flushed from storage AND memory.
     µb.assets.rmrf();
 

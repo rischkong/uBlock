@@ -16,7 +16,7 @@
     You should have received a copy of the GNU General Public License
     along with this program.  If not, see {http://www.gnu.org/licenses/}.
 
-    Home: https://github.com/chrisaljoudi/uBlock
+    Home: https://github.com/uBlockAdmin/uBlock
 */
 
 /* global vAPI, µBlock */
@@ -81,17 +81,17 @@ Also, other "anomalies" can occur:
 
 - a network request for a root document is fired without the corresponding
 tab being really assigned a new URL
-<https://github.com/chrisaljoudi/uBlock/issues/516>
+<https://github.com/uBlockAdmin/uBlock/issues/516>
 
 - a network request for a secondary resource is labeled with a tab id for
 which no root document was pulled for that tab.
-<https://github.com/chrisaljoudi/uBlock/issues/1001>
+<https://github.com/uBlockAdmin/uBlock/issues/1001>
 
 - a network request for a secondary resource is made without the root
 document to which it belongs being formally bound yet to the proper tab id,
 causing a bad scope to be used for filtering purpose.
-<https://github.com/chrisaljoudi/uBlock/issues/1205>
-<https://github.com/chrisaljoudi/uBlock/issues/1140>
+<https://github.com/uBlockAdmin/uBlock/issues/1205>
+<https://github.com/uBlockAdmin/uBlock/issues/1140>
 
 So the solution here is to keep a lightweight data structure which only
 purpose is to keep track as accurately as possible of which root document
@@ -109,18 +109,18 @@ The TabContext objects do not suffer this restriction, and as a result they
 offer the most reliable picture of which root document URL is really associated
 to which tab. Moreover, the TabObject can undo an association from a root
 document, and automatically re-associate with the next most recent. This takes
-care of <https://github.com/chrisaljoudi/uBlock/issues/516>.
+care of <https://github.com/uBlockAdmin/uBlock/issues/516>.
 
 The PageStore object no longer cache the various information about which
 root document it is currently bound. When it needs to find out, it will always
 defer to the TabContext object, which will provide the real answer. This takes
-case of <https://github.com/chrisaljoudi/uBlock/issues/1205>. In effect, the
+case of <https://github.com/uBlockAdmin/uBlock/issues/1205>. In effect, the
 master switch and dynamic filtering rules can be evaluated now properly even
 in the absence of a PageStore object, this was not the case before.
 
 Also, the TabContext object will try its best to find a good candidate root
 document URL for when none exists. This takes care of 
-<https://github.com/chrisaljoudi/uBlock/issues/1001>.
+<https://github.com/uBlockAdmin/uBlock/issues/1001>.
 
 The TabContext manager is self-contained, and it takes care to properly
 housekeep itself.
@@ -130,7 +130,7 @@ housekeep itself.
 µb.tabContextManager = (function() {
     var tabContexts = Object.create(null);
 
-    // https://github.com/chrisaljoudi/uBlock/issues/1001
+    // https://github.com/uBlockAdmin/uBlock/issues/1001
     // This is to be used as last-resort fallback in case a tab is found to not
     // be bound while network requests are fired for the tab.
     var mostRecentRootDocURL = '';
@@ -145,6 +145,7 @@ housekeep itself.
         this.normalURL =
         this.rootHostname =
         this.rootDomain = '';
+        this.rootHostnameHashes = new Map();
         this.timer = null;
         this.onTabCallback = null;
         this.onTimerCallback = null;
@@ -201,6 +202,7 @@ housekeep itself.
             this.normalURL = µb.normalizePageURL(this.tabId, this.rawURL);
             this.rootHostname = µb.URI.hostnameFromURI(this.normalURL);
             this.rootDomain = µb.URI.domainFromHostname(this.rootHostname);
+            this.rootHostnameHashes = µb.getHostnameHashesFromLabelsBackward(this.rootHostname, this.rootDomain, false);
         }
     };
 
@@ -218,7 +220,7 @@ housekeep itself.
     };
 
     // Called when a former push is a false positive:
-    //   https://github.com/chrisaljoudi/uBlock/issues/516
+    //   https://github.com/uBlockAdmin/uBlock/issues/516
     TabContext.prototype.unpush = function(url) {
         if ( vAPI.isBehindTheSceneTabId(this.tabId) ) {
             return;
@@ -280,14 +282,14 @@ housekeep itself.
         if ( entry !== undefined ) {
             return entry;
         }
-        // https://github.com/chrisaljoudi/uBlock/issues/1025
+        // https://github.com/uBlockAdmin/uBlock/issues/1025
         // Google Hangout popup opens without a root frame. So for now we will
         // just discard that best-guess root frame if it is too far in the
         // future, at which point it ceases to be a "best guess".
         if ( mostRecentRootDocURL !== '' && mostRecentRootDocURLTimestamp + 500 < Date.now() ) {
             mostRecentRootDocURL = '';
         }
-        // https://github.com/chrisaljoudi/uBlock/issues/1001
+        // https://github.com/uBlockAdmin/uBlock/issues/1001
         // Not a behind-the-scene request, yet no page store found for the
         // tab id: we will thus bind the last-seen root document to the
         // unbound tab. It's a guess, but better than ending up filtering
@@ -340,6 +342,7 @@ housekeep itself.
         entry.normalURL = µb.normalizePageURL(entry.tabId);
         entry.rootHostname = µb.URI.hostnameFromURI(entry.normalURL);
         entry.rootDomain = µb.URI.domainFromHostname(entry.rootHostname);
+        entry.rootHostnameHashes = µb.getHostnameHashesFromLabelsBackward(entry.rootHostname, entry.rootDomain, false);
     })();
 
     // Context object, typically to be used to feed filtering engines.
@@ -347,6 +350,7 @@ housekeep itself.
         var tabContext = lookup(tabId);
         this.rootHostname = tabContext.rootHostname;
         this.rootDomain = tabContext.rootDomain;
+        this.rootHostnameHashes = tabContext.rootHostnameHashes;
         this.pageHostname = 
         this.pageDomain =
         this.requestURL =
@@ -382,13 +386,45 @@ vAPI.tabs.onNavigation = function(details) {
     var pageStore = µb.bindTabToPageStats(details.tabId, 'afterNavigate');
 
 
-    // https://github.com/chrisaljoudi/uBlock/issues/630
+    // https://github.com/uBlockAdmin/uBlock/issues/630
     // The hostname of the bound document must always be present in the
     // mini-matrix. That's the best place I could find for the fix, all other
     // options had bad side-effects or complications.
     // TODO: Eventually, we will have to use an API to check whether a scheme
     //       is supported as I suspect we are going to start to see `ws`, `wss`
     //       as well soon.
+    var µburi = µb.URI;
+    var context = pageStore.createContextFromPage();
+    context.requestURL = vAPI.punycodeURL(details.url);
+    context.requestHostname = µburi.hostnameFromURI(details.url);
+    context.requestDomain = µburi.domainFromHostname(context.requestHostname);
+    
+    if (pageStore !== null && pageStore.getNetFilteringSwitch()) {
+        context.requestType = 'snippet';
+        const request = {
+            locationURL: context.requestURL,
+            pageURL: context.requestURL,
+            procedureSelectorsOnly: false
+        };
+        var options = {
+            skipCosmeticFiltering: false                    
+        };
+        µb.cosmeticFilteringEngine.injectNow(details, request, context, options);
+    }
+
+    // Blocking behind-the-scene requests can break a lot of stuff: prevent
+    // browser updates, prevent extension updates, prevent extensions from
+    // working properly, etc.
+    // So we filter if and only if the "advanced user" mode is selected
+    context.requestType = 'webrtc';
+    var result = '';
+    result = pageStore.filterRequestNoCache(context);
+    if ( !µb.isAllowResult(result) ) {
+        µb.scriptlets.injectNow(context, details, "nowebrtc");
+        pageStore.logRequest(context, result);
+        µb.logger.writeOne(details.tabId, context, result);
+    }
+    
     if ( pageStore && tabContext.rawURL.lastIndexOf('http', 0) === 0 ) {
         pageStore.hostnameToCountMap[tabContext.rootHostname] = 0;
     }
@@ -422,7 +458,7 @@ vAPI.tabs.onClosed = function(tabId) {
 
 /******************************************************************************/
 
-// https://github.com/chrisaljoudi/uBlock/issues/297
+// https://github.com/uBlockAdmin/uBlock/issues/297
 
 vAPI.tabs.onPopup = function(details) {
     // console.debug('vAPI.tabs.onPopup: details = %o', details);
@@ -439,23 +475,27 @@ vAPI.tabs.onPopup = function(details) {
     var µburi = µb.URI;
     var openerHostname = µburi.hostnameFromURI(openerURL);
     var openerDomain = µburi.domainFromHostname(openerHostname);
-
+    let pageHostnameHashes = µb.getHostnameHashesFromLabelsBackward(openerHostname, openerDomain, false);
     var targetURL = details.targetURL;
-
+    let requestHostname = µb.URI.hostnameFromURI(targetURL);
+    let requestDomain =  µburi.domainFromHostname(requestHostname);
+    
     var context = {
         pageHostname: openerHostname,
         pageDomain: openerDomain,
         rootHostname: openerHostname,
         rootDomain: openerDomain,
         requestURL: targetURL,
-        requestHostname: µb.URI.hostnameFromURI(targetURL),
-        requestType: 'popup'
+        requestHostname: requestHostname,
+        requestDomain: requestDomain,
+        requestType: 'popup',
+        pageHostnameHashes: pageHostnameHashes
     };
 
     var result = '';
 
-    // https://github.com/chrisaljoudi/uBlock/issues/323
-    // https://github.com/chrisaljoudi/uBlock/issues/1142
+    // https://github.com/uBlockAdmin/uBlock/issues/323
+    // https://github.com/uBlockAdmin/uBlock/issues/1142
     // If popup OR opener URL is whitelisted, do not block the popup
     if (
         result === '' &&
@@ -465,7 +505,7 @@ vAPI.tabs.onPopup = function(details) {
         result = µb.staticNetFilteringEngine.matchStringExactType(context, targetURL, 'popup');
     }
 
-    // https://github.com/chrisaljoudi/uBlock/issues/91
+    // https://github.com/uBlockAdmin/uBlock/issues/91
     var pageStore = µb.pageStoreFromTabId(details.openerTabId); 
     if ( pageStore ) {
         pageStore.logRequest(context, result);
@@ -514,7 +554,7 @@ vAPI.tabs.registerListeners();
         return this.pageStores[tabId] = this.PageStore.factory(tabId);
     }
 
-    // https://github.com/chrisaljoudi/uBlock/issues/516
+    // https://github.com/uBlockAdmin/uBlock/issues/516
     // If context if 'beforeRequest', do not rebind
     if ( context === 'beforeRequest' ) {
         return pageStore;
@@ -553,7 +593,7 @@ vAPI.tabs.registerListeners();
 /******************************************************************************/
 
 // Stale page store entries janitor
-// https://github.com/chrisaljoudi/uBlock/issues/455
+// https://github.com/uBlockAdmin/uBlock/issues/455
 
 var pageStoreJanitorPeriod = 15 * 60 * 1000;
 var pageStoreJanitorSampleAt = 0;

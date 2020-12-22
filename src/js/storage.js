@@ -33,7 +33,11 @@
         µBlock.storageUsed = bytesInUse;
         callback(bytesInUse);
     };
-    vAPI.storage.getBytesInUse(null, getBytesInUseHandler);
+    if ( vAPI.storage.getBytesInUse instanceof Function ) {
+        vAPI.storage.getBytesInUse(null, getBytesInUseHandler);
+    } else {
+        callback();
+    }
 };
 
 /******************************************************************************/
@@ -159,6 +163,10 @@
         var compiledFilters = µb.compileFilters(filters);
         var snfe = µb.staticNetFilteringEngine;
         var cfe = µb.cosmeticFilteringEngine;
+        if(compiledFilters.get("c").length > 0) {
+            cfe.appendHostnameFilters(compiledFilters.get("c"));
+            compiledFilters.set("c", []);
+        }
         var acceptedCount = snfe.acceptedCount + cfe.acceptedCount;
         var duplicateCount = snfe.duplicateCount + cfe.duplicateCount;
         µb.applyCompiledFilters(compiledFilters);
@@ -173,7 +181,7 @@
     };
 
     var onLoaded = function(details) {
-        // https://github.com/chrisaljoudi/uBlock/issues/976
+        // https://github.com/uBlockAdmin/uBlock/issues/976
         // If we reached this point, the filter quite probably needs to be
         // added for sure: do not try to be too smart, trying to avoid
         // duplicates at this point may lead to more issues.
@@ -186,18 +194,17 @@
 /******************************************************************************/
 
 µBlock.getAvailableLists = function(callback) {
-    var availableLists = {};
-    var relocationMap = {};
-
     var fixLocation = function(location) {
-        // https://github.com/chrisaljoudi/uBlock/issues/418
+        // https://github.com/uBlockAdmin/uBlock/issues/418
         // We now support built-in external filter lists
         if ( /^https?:/.test(location) === false ) {
             location = 'assets/thirdparties/' + location;
         }
         return location;
     };
-
+    var availableLists = {};
+    var relocationMap = {};
+    var locationOfAA = 'acceptable-ads';
     // selected lists
     var onSelectedListsLoaded = function(store) {
         var µb = µBlock;
@@ -205,8 +212,8 @@
         var locations = Object.keys(lists);
         var location, availableEntry, storedEntry;
         var off;
-
         while ( location = locations.pop() ) {
+           
             storedEntry = lists[location];
             off = storedEntry.off === true;
             // New location?
@@ -217,13 +224,14 @@
                     off = lists[location].off === true;
                 }
             }
+
             availableEntry = availableLists[location];
             if ( availableEntry === undefined ) {
                 µb.purgeFilterList(location);
                 continue;
             }
             availableEntry.off = off;
-            µb.assets.setHomeURL(location, availableEntry.homeURL);
+            
             if ( storedEntry.entryCount !== undefined ) {
                 availableEntry.entryCount = storedEntry.entryCount;
             }
@@ -232,7 +240,7 @@
             }
             // This may happen if the list name was pulled from the list
             // content.
-            // https://github.com/chrisaljoudi/uBlock/issues/982
+            // https://github.com/uBlockAdmin/uBlock/issues/982
             // There is no guarantee the title was successfully extracted from
             // the list content.
             if ( availableEntry.title === '' &&
@@ -247,7 +255,9 @@
 
     // built-in lists
     var onBuiltinListsLoaded = function(details) {
+        var µb = µBlock;
         var location, locations;
+       
         try {
             locations = JSON.parse(details.content);
         } catch (e) {
@@ -259,18 +269,20 @@
                 continue;
             }
             entry = locations[location];
-            location = fixLocation(location);
+            µb.assets.setHomeURL(location, entry.homeURL);
             // Migrate obsolete location to new location, if any
             if ( typeof entry.oldLocation === 'string' ) {
-                entry.oldLocation = fixLocation(entry.oldLocation);
+                //entry.oldLocation = fixLocation(entry.oldLocation);
                 relocationMap[entry.oldLocation] = location;
             }
             availableLists[location] = entry;
         }
-
+        if(availableLists.hasOwnProperty(locationOfAA) !== false) {
+            availableLists[locationOfAA].off = µb.turnOffAA;
+        }
         // Now get user's selection of lists
         vAPI.storage.preferences.get(
-            { 'remoteBlacklists': availableLists },
+            { 'remoteBlacklists': {} },
             onSelectedListsLoaded
         );
     };
@@ -398,7 +410,7 @@
             onDone();
             return;
         }
-
+       
         var i = toLoad.length;
         while ( i-- ) {
             µb.getCompiledFilterList(toLoad[i], onCompiledListLoaded);
@@ -426,13 +438,13 @@
             if ( listMeta && listMeta.title === '' ) {
                 var matches = details.content.slice(0, 1024).match(/(?:^|\n)!\s*Title:([^\n]+)/i);
                 if ( matches !== null ) {
-                    listMeta.title = matches[1].trim();
+                    listMeta.title = JSON.parse(JSON.stringify(matches[1].trim()));
                 }
             }
-
             //console.debug('µBlock.getCompiledFilterList/onRawListLoaded: compiling "%s"', path);
-            details.content = µb.compileFilters(details.content);
+            details.content = JSON.stringify(Array.from(µb.compileFilters(details.content)));
             µb.assets.put(compiledPath, details.content);
+            details.content = new Map(JSON.parse(details.content));
         }
         callback(details);
     };
@@ -443,6 +455,7 @@
             µb.assets.get(path, onRawListLoaded);
             return;
         }
+        details.content = new Map(JSON.parse(details.content));
         //console.debug('µBlock.getCompiledFilterList/onCompiledListLoaded: using compiled version for "%s"', path);
         details.path = path;
         callback(details);
@@ -466,24 +479,27 @@
 
 /******************************************************************************/
 
+
 µBlock.compileFilters = function(rawText) {
-    var rawEnd = rawText.length;
-    var compiledFilters = [];
+    let rawEnd = rawText.length;
+    let compiledFilters = new Map();
+    compiledFilters.set('n',[]);
+    compiledFilters.set('c',[]);
 
     // Useful references:
     //    https://adblockplus.org/en/filter-cheatsheet
     //    https://adblockplus.org/en/filters
-    var staticNetFilteringEngine = this.staticNetFilteringEngine;
-    var cosmeticFilteringEngine = this.cosmeticFilteringEngine;
-    var reIsWhitespaceChar = /\s/;
-    var reMaybeLocalIp = /^[\d:f]/;
-    var reIsLocalhostRedirect = /\s+(?:broadcasthost|local|localhost|localhost\.localdomain)(?=\s|$)/;
-    var reLocalIp = /^(?:0\.0\.0\.0|127\.0\.0\.1|::1|fe80::1%lo0)/;
+    let staticNetFilteringEngine = this.staticNetFilteringEngine;
+    let cosmeticFilteringEngine = this.cosmeticFilteringEngine;
+    let reIsWhitespaceChar = /\s/;
+    let reMaybeLocalIp = /^[\d:f]/;
+    let reIsLocalhostRedirect = /\s+(?:broadcasthost|local|localhost|localhost\.localdomain)(?=\s|$)/;
+    let reLocalIp = /^(?:0\.0\.0\.0|127\.0\.0\.1|::1|fe80::1%lo0)/;
 
-    var lineBeg = 0, lineEnd, currentLineBeg;
-    var line, lineRaw, c, pos;
-
-    while ( lineBeg < rawEnd ) {
+    let lineBeg = 0, lineEnd, currentLineBeg;
+    let line, c, pos;
+   
+   while ( lineBeg < rawEnd ) {
         lineEnd = rawText.indexOf('\n', lineBeg);
         if ( lineEnd === -1 ) {
             lineEnd = rawText.indexOf('\r', lineBeg);
@@ -495,10 +511,10 @@
         // rhill 2014-04-18: The trim is important here, as without it there
         // could be a lingering `\r` which would cause problems in the
         // following parsing code.
-        line = lineRaw = rawText.slice(lineBeg, lineEnd).trim();
+        line = JSON.parse(JSON.stringify(rawText.slice(lineBeg, lineEnd).trim()));
         currentLineBeg = lineBeg;
         lineBeg = lineEnd + 1;
-
+    
         if ( line.length === 0 ) {
             continue;
         }
@@ -511,7 +527,7 @@
 
         // Parse or skip cosmetic filters
         // All cosmetic filters are caught here
-        if ( cosmeticFilteringEngine.compile(line, compiledFilters) ) {
+        if ( cosmeticFilteringEngine.compile(line, compiledFilters.get('c')) ) {
             continue;
         }
 
@@ -550,25 +566,18 @@
         if ( line.length === 0 ) {
             continue;
         }
-
-        //staticNetFilteringEngine.add(line);
-        staticNetFilteringEngine.compile(line, compiledFilters);
+        staticNetFilteringEngine.compile(line, compiledFilters.get('n'));
     }
-
-    return compiledFilters.join('\n');
+    return compiledFilters;
 };
 
 /******************************************************************************/
 
 µBlock.applyCompiledFilters = function(rawText) {
-    var skipCosmetic = !this.userSettings.parseAllABPHideFilters;
-    var staticNetFilteringEngine = this.staticNetFilteringEngine;
-    var cosmeticFilteringEngine = this.cosmeticFilteringEngine;
-    var lineBeg = 0;
-    var rawEnd = rawText.length;
-    while ( lineBeg < rawEnd ) {
-        lineBeg = cosmeticFilteringEngine.fromCompiledContent(rawText, lineBeg, skipCosmetic);
-        lineBeg = staticNetFilteringEngine.fromCompiledContent(rawText, lineBeg);
+    let skipCosmetic = !this.userSettings.parseAllABPHideFilters;
+    if(rawText != "") {
+        this.staticNetFilteringEngine.fromCompiledContent(rawText.get('n'));
+        this.cosmeticFilteringEngine.fromCompiledContent(rawText.get('c'), skipCosmetic);
     }
 };
 
@@ -655,7 +664,7 @@
 /******************************************************************************/
 
 µBlock.toSelfie = function() {
-    var selfie = {
+    let selfie = {
         magic: this.systemSettings.selfieMagic,
         publicSuffixList: publicSuffixList.toSelfie(),
         filterLists: this.remoteBlacklists,
@@ -695,6 +704,12 @@
 
 µBlock.updateStartHandler = function(callback) {
     var µb = this;
+    let entries = null;
+    var onLoaded = function(bin) {
+        entries = bin.cached_asset_entries || {};
+        µb.getAvailableLists(onListsReady);
+    };
+    
     var onListsReady = function(lists) {
         var assets = {};
         for ( var location in lists ) {
@@ -702,6 +717,8 @@
                 continue;
             }
             if ( lists[location].off ) {
+                if ( entries.hasOwnProperty(location)) 
+                    µBlock.assets.purge(location);
                 continue;
             }
             assets[location] = true;
@@ -710,8 +727,11 @@
         assets['assets/ublock/mirror-candidates.txt'] = true;
         callback(assets);
     };
-
-    this.getAvailableLists(onListsReady);
+    if ( entries === null ) {
+        vAPI.storage.get('cached_asset_entries', onLoaded);
+    } else {
+        this.getAvailableLists(onListsReady);
+    }
 };
 
 /******************************************************************************/
@@ -725,11 +745,12 @@
     if ( entry.off ) {
         return;
     }
+    
     // Compile the list while we have the raw version in memory
     //console.debug('µBlock.getCompiledFilterList/onRawListLoaded: compiling "%s"', path);
     this.assets.put(
         this.getCompiledFilterListPath(path),
-        this.compileFilters(details.content)
+        JSON.stringify(Array.from(this.compileFilters(details.content)))
     );
 };
 
